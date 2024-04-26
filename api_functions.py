@@ -7,14 +7,17 @@ from telegram.ext import Application, CommandHandler, ConversationHandler, Messa
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.DEBUG
 )
-
+# ---------------- tools ----------------
 logger = logging.getLogger(__name__)
 TOKEN = '6693149081:AAEoLL-E4KTBBPMrccPoa_vysJeZVi4unVg'
 TAG_BOT = '@Ansedo_Bot'
 ASK_NAME, ASK_GAME, ASK_COOP, ASK_HOURS, ASK_DESC = range(1, 6)
+con = sqlite3.connect("data.sqlite")
+cur = con.cursor()
 
 
 # ---------------- Commands ----------------
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
@@ -42,6 +45,9 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def new(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    data = context.user_data
+    data['user_id'] = user_id
     await update.message.reply_text("Как мне тебя называть ?")
     return ASK_NAME
 
@@ -50,9 +56,6 @@ async def new(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def _name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
-
-    with open('user_data.txt', 'a') as file:
-        file.write(user_message + '\n')
 
     data = context.user_data
     data['name'] = user_message
@@ -78,9 +81,6 @@ async def _game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_message not in keyboard_games[0] and user_message not in keyboard_games[1]:
         return ASK_GAME
 
-    with open('user_data.txt', 'a') as file:
-        file.write(user_message + '\n')
-
     data = context.user_data
     data['game'] = user_message
     # ----SAVED!
@@ -99,9 +99,6 @@ async def _coop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_message not in keyboard_games[0]:
         return ASK_COOP
 
-    with open('user_data.txt', 'a') as file:
-        file.write(user_message + '\n')
-
     data = context.user_data
     data['coop'] = user_message
     # ----SAVED!
@@ -116,9 +113,6 @@ async def _hours(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user_message.isdigit():
         return ASK_HOURS
 
-    with open('user_data.txt', 'a') as file:
-        file.write(user_message + '\n')
-
     data = context.user_data
     data['hours'] = user_message
     # ----SAVED!
@@ -132,13 +126,28 @@ async def _hours(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _description(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
 
-    with open('user_data.txt', 'a') as file:
-        file.write(user_message + '\n')
-
     data = context.user_data
     data['desc'] = user_message
-    # ----SAVED!
 
+    with open('user_data.txt', 'a') as file:
+        file.write(
+            '\n' + f'''{data['game']}, {data['name']}, {data['coop']}, {data['hours']}, {data['desc']}, {data['user_id']}''')
+
+    # ----SAVED!
+    sql = """
+        INSERT INTO profile (game, name, st, hours, description, user_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """
+    cur.execute(sql, (
+        data['game'],
+        data['name'],
+        data['coop'],
+        data['hours'],
+        data['desc'],
+        data['user_id']
+    ))
+    con.commit()
+    con.close()
     return ConversationHandler.END
 
 
@@ -187,18 +196,5 @@ def main() -> None:
     # Connecting messages...
     # app.add_handler(MessageHandler(filters.TEXT, handle_text_message)) - Этот обработчик реагирует на пользовательские сообщения, создан чисто для тестов
 
-
-# ввод данных в бд!
-# con = sqlite3.connect("data.sqlite")
-# cur = con.cursor()
-# result = cur.execute(
-#     f"""INSERT INTO profile(game, name, st, hours, description)
-#     VALUES({data['game']}, {data['name']},{data['coop']}, {data['hours']}, {data['desc']})""").fetchall()
-# con.close()
-# # вывод данных из бд!
-# con = sqlite3.connect("data.sqlite")
-# cur = con.cursor()
-# result_0 = cur.execute(
-#     f"""SELECT game, name, st, hours, description, user_id FROM profile""").fetchall()
-# con.close()
-# app.run_polling()
+    # |Starting|
+    app.run_polling()
