@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import random
 import sqlite3
 
 from telegram import ReplyKeyboardRemove, ReplyKeyboardMarkup, Update
@@ -12,8 +14,14 @@ logger = logging.getLogger(__name__)
 TOKEN = '6693149081:AAEoLL-E4KTBBPMrccPoa_vysJeZVi4unVg'
 TAG_BOT = '@Ansedo_Bot'
 ASK_NAME, ASK_GAME, ASK_COOP, ASK_HOURS, ASK_DESC = range(1, 6)
-con = sqlite3.connect("data.sqlite")
-cur = con.cursor()
+con: sqlite3
+cur: sqlite3.Connection.cursor
+
+
+def __open_data_base() -> None:
+    global con, cur
+    con = sqlite3.connect("data.sqlite")
+    cur = con.cursor()
 
 
 # ---------------- Commands ----------------
@@ -32,24 +40,72 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                                     "   <b>▼</b>\n"
                                     "   <b>🠖</b> /cancel - <i>отменить создание анкеты</i>\n"
                                     "<b>🠖</b> /view - <i>перейти к поиску</i>\n"
+                                    "   <b>▼</b>\n"
+                                    "   <b>🠖</b> /s - <i>прекратить поиск</i>\n"
                                     "<b>🠖</b> /stop - <i>!редакнуть!</i>\n"
                                     )
-
-
-async def view(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text("soon..")
 
 
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("soon..")
 
 
-async def new(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def delay(seconds):
+    await asyncio.sleep(seconds)
+
+
+async def view(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    __open_data_base()
     user_id = update.effective_user.id
+    res = cur.execute(f"""SELECT user_id FROM profile""").fetchall()
+    if res and user_id in [i[0] for i in res]:
+        user_game = cur.execute(f"""SELECT game FROM profile WHERE user_id = '{user_id}'""").fetchall()
+        res1 = cur.execute(
+            f"""SELECT name, st, hours, description, user_id FROM profile WHERE game = '{user_game[0][0]}' AND user_id != '{user_id}'""").fetchall()
+        keyboard_games = [['👍', '👎']]
+        reply_markup = ReplyKeyboardMarkup(keyboard_games, one_time_keyboard=True, resize_keyboard=True)
+        random.shuffle(res1)
+        for i in res1:
+            one = list(map(str, list(i[:-1])))
+            id = i[-1]
+            one = '|'.join(one)
+            await __curent(update, context, one, reply_markup)
+            user_message = update.message.text
+            if user_message == '👍':
+                await _picked(update, context, id)
+            elif user_message == '👎':
+                continue
+            await update.message.reply_text(f"Нет такого варинта ответа.")
+        await update.message.reply_text(f"Анкет на вашу игру не осталось. ˙ᵕ˙")
+    else:
+        await update.message.reply_html("Без вашей анкеты, я бессилен (...")
+
+
+async def new(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    __open_data_base()
     data = context.user_data
+    user_id = update.effective_user.id
+    res = cur.execute(f"""SELECT user_id FROM profile""").fetchall()
+    if res and user_id in [i[0] for i in res]:
+        cur.execute(f"""DELETE FROM profile WHERE user_id = '{user_id}'""").fetchall()
+        con.commit()
     data['user_id'] = user_id
     await update.message.reply_text("Как мне тебя называть ?")
     return ASK_NAME
+
+
+# --- Search ---
+
+async def __curent(update: Update, context: ContextTypes.DEFAULT_TYPE, one, markup):
+    print('\n\n___________________________________________\n\n')
+    await update.message.reply_text(f"{one}", reply_markup=markup)
+
+
+async def _picked(update: Update, context: ContextTypes.DEFAULT_TYPE, id: str | int):
+    print('\n\n\n\n\n____________________________________________')
+    chat = context.bot.get_chat(id)
+    nickname = chat.username
+    await update.message.reply_text(f"{nickname}")
 
 
 # --- Profile ---
@@ -148,6 +204,8 @@ async def _description(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ))
     con.commit()
     con.close()
+    await update.message.reply_text('⌞ Ваша анкета была сохранена, можем начать поиск людей. (/view) ⌝')
+
     return ConversationHandler.END
 
 
@@ -160,7 +218,14 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Диалог отменен")
+    data = context.user_data
+    data.clear()
+    await update.message.reply_text("Анкета была отменена.")
+    return ConversationHandler.END
+
+
+async def stop_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Подождем пока кто-то увидит твою анкету", reply_markup=ReplyKeyboardRemove())
     return ConversationHandler.END
 
 
@@ -176,7 +241,9 @@ def main() -> None:
     app.add_handler(CommandHandler('stop', stop))
     app.add_handler(CommandHandler('view', view))
 
-    conv_handler = ConversationHandler(
+    # Init scenarios...
+
+    make_profile = ConversationHandler(
         entry_points=[CommandHandler('new', new)],
         states={
             ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, _name)],
@@ -191,9 +258,11 @@ def main() -> None:
         },
         fallbacks=[CommandHandler('cancel', cancel)]
     )
-    app.add_handler(conv_handler)
+    app.add_handler(make_profile)
 
     # Connecting messages...
+    app.add_handler(CommandHandler('s', stop_search))
+
     # app.add_handler(MessageHandler(filters.TEXT, handle_text_message)) - Этот обработчик реагирует на пользовательские сообщения, создан чисто для тестов
 
     # |Starting|
